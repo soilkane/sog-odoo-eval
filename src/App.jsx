@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "./supabase.js";
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from "recharts";
 
-const SUBS = ['Mauritanie','Niger','Sénégal','Tchad','Mali','Guinée','Groupe/Siège'];
-const FCTS = ['Comptable','Resp. Achats','Resp. Ventes','Contrôleur/Auditeur','Resp. ADV','Resp. Stock','DSI/IT','Direction','RH/Paie','Autre'];
+const SUBS = ['Côte-Ivoire','Gambie','Guinée','Mali','Mauritanie','Niger','Sénégal','Tchad'];
+const FCTS = ['DG','DEX', 'DAF', 'RH','DSI','DC'];
 const DURS = ['< 6 mois','6-12 mois','1-2 ans','> 2 ans'];
 const FRQS = ['Quotidienne','Hebdomadaire','Mensuelle','Occasionnelle'];
 const F5 = ['Jamais','Rarement','Parfois','Souvent','Très souvent'];
