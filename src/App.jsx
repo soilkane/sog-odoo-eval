@@ -83,7 +83,7 @@ const QUESTIONS = {
   E:[
     {code:'E.01',cobit:'APO11.04',text:"La saisie et validation des bons de commande d'achats pétroliers fonctionnent-elles correctement ?",type:'likert'},
     {code:'E.02',cobit:'APO11.04',text:"Le traitement des bons de réception produits pétroliers est-il fiable ?",type:'likert'},
-    {code:'E.03',cobit:'APO11.04',text:"Le traitement des factures fournisseurs pétroliers (saisie, validation, comptabilisation SYSCOHADA) est-il correct ?",type:'likert',hesk:"Non-conformité SYSCOHADA signalée par CAC"},
+    {code:'E.03',cobit:'APO11.04',text:"Le traitement des factures fournisseurs pétroliers (saisie, validation, comptabilisation ) est-il correct ?",type:'likert',hesk:"Non-conformité signalée"},
     {code:'E.04',cobit:'APO11.04',text:"Les écarts de prix entre bon de commande et facture définitive sont-ils correctement gérés ?",type:'oui_non',hesk:"Problème récurrent : différence BC/facture sans compte d'écart isolé"},
     {code:'E.05',cobit:'APO11.04',text:"Le règlement des factures fournisseurs et la gestion des échéances sont-ils satisfaisants ?",type:'likert'},
     {code:'E.06',cobit:'APO11.02',text:"Lacunes critiques du module Achats Pétroliers :",type:'texte'},
@@ -120,7 +120,7 @@ const QUESTIONS = {
     {code:'I.04',cobit:'APO11.04',text:"Les écritures analytiques des mouvements de stock restent-elles cohérentes avec la comptabilité générale ?",type:'oui_non',hesk:"Déconnexion signalée : analytique et comptabilité coûts stocks divergent"},
     {code:'I.05',cobit:'APO11.04',text:"Les comptes fournisseurs 401 sont-ils correctement séparés (produits pétroliers vs biens et services) ?",type:'oui_non'},
     {code:'I.06',cobit:'APO11.04',text:"La gestion budgétaire (contrôle engagements, alertes dépassement) est-elle opérationnelle ?",type:'oui_non',hesk:"Module budget non activé — relances répétées"},
-    {code:'I.07',cobit:'APO11.04',text:"Les états financiers SYSCOHADA générés par Odoo sont-ils conformes aux normes ?",type:'likert',hesk:"Non-conformité SYSCOHADA signalée par CAC"},
+    {code:'I.07',cobit:'APO11.04',text:"Les états financiers SYSCOHADA générés par Odoo sont-ils conformes aux normes ?",type:'likert',hesk:"Non-conformité"},
     {code:'I.08',cobit:'APO11.02',text:"Lacunes critiques du module Comptabilité & Finance :",type:'texte'},
   ],
   J:[
