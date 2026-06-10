@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase.js";
 
 const NA_VALUE = '__NA__';
+const LS_KEY = 'sog_odoo_eval_v3';
 const PAYS = ["Côte d'Ivoire",'Gambie','Guinée','Mali','Mauritanie','Niger','Sénégal','Tchad'];
 
 const HESK_STATS = {
@@ -186,8 +187,25 @@ const QUESTIONS = {
   ],
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Utils ────────────────────────────────────────────────────────────────────
 const isNA = v => v === NA_VALUE;
+
+function genCode(nom, pays) {
+  const initials = (nom||'XX').slice(0,2).toUpperCase();
+  const pays2 = (pays||'XX').slice(0,2).toUpperCase();
+  const rand = Math.random().toString(36).slice(2,6).toUpperCase();
+  return `SOG-${initials}${pays2}-${rand}`;
+}
+
+function lsSave(payload) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(payload)); } catch(e) {}
+}
+function lsLoad() {
+  try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch(e) { return null; } 
+}
+function lsClear() {
+  try { localStorage.removeItem(LS_KEY); } catch(e) {}
+}
 
 function scoreLevel(s) {
   if (s === null || s === undefined) return {lvl:'—', badge:'badge-2', color:'#888780', label:'Non évalué'};
@@ -228,7 +246,7 @@ async function generateAI(data) {
   const secKeys = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q'];
   const lines = secKeys.map(sid => { const sc = sectionScore(sid, data); const lvl = scoreLevel(sc); return `${sid}:${sc !== null ? sc.toFixed(1) : 'N/A'}(${lvl.label})`; }).join(', ');
   const naCount = secKeys.reduce((acc, sid) => { const p = secProgress(sid, data); return acc + p.na; }, 0);
-  const prompt = `Tu es expert COBIT® 2019, ERP Odoo, DSI conseil pour Star Oil Group (distribution pétrolière, Afrique de l'Ouest, 10 filiales).\n\nCONTEXTE : 1 066 tickets HESK depuis 2023 dont bugs non résolus :\n- ~67 tickets : compte analytique requis bloquant BL/TI\n- ~48 tickets : valorisation stocks OverflowError float infinity\n- ~41 tickets : BL impossibles à valider "no picking out"\n- ~31 tickets : structured_vat non défini — facturation bloquée\n- ~28 tickets : import CYNOD/Paycard erreur SQL\n\nScores questionnaire : ${lines}\nQuestions N/A (modules non utilisés) : ${naCount}\nPays répondant : ${data.id_pays||'N/R'}\nRecommandation (Q.04) : ${data['Q.04']||'N/R'}\nSatisfaction globale (Q.01) : ${data['Q.01']||'N/R'}/5\n\nRédige une analyse COBIT® 2019 en 4 parties (180 mots max) :\n1. DIAGNOSTIC GLOBAL : niveau COBIT atteint, gravité au regard des 1 066 tickets\n2. DOMAINES CRITIQUES : les 3 pires avec score et lien bug HESK\n3. POINTS FORTS : si score ≥ 3.5\n4. RECOMMANDATION DSI : migration Odoo v17 ou remplacement, justification factuelle\n\nFrançais, texte structuré, pas de markdown.`;
+  const prompt = `Tu es expert COBIT® 2019, ERP Odoo, DSI conseil pour Star Oil Group (distribution pétrolière, Afrique de l'Ouest, 10 filiales).\n\nCONTEXTE : 1 066 tickets HESK depuis 2023 dont bugs non résolus :\n- ~67 tickets : compte analytique requis bloquant BL/TI\n- ~48 tickets : valorisation stocks OverflowError float infinity\n- ~41 tickets : BL impossibles à valider "no picking out"\n- ~31 tickets : structured_vat non défini — facturation bloquée\n- ~28 tickets : import CYNOD/Paycard erreur SQL\n\nScores : ${lines}\nN/A : ${naCount}\nPays : ${data.id_pays||'N/R'}\nRecommandation Q.04 : ${data['Q.04']||'N/R'}\nSatisfaction Q.01 : ${data['Q.01']||'N/R'}/5\n\nRédige une analyse COBIT® 2019 en 4 parties (180 mots max) :\n1. DIAGNOSTIC GLOBAL\n2. DOMAINES CRITIQUES (3 pires)\n3. POINTS FORTS (si score ≥ 3.5)\n4. RECOMMANDATION DSI\n\nFrançais, structuré, pas de markdown.`;
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{role:'user',content:prompt}]})
@@ -239,16 +257,7 @@ async function generateAI(data) {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function Toast({msg}) {
-  return msg ? <div className="fixed bottom-4 right-4 bg-blue-800 text-white px-4 py-2 rounded-lg text-xs z-50 shadow-lg">{msg}</div> : null;
-}
-
-function SelBtn({label, selected, onClick, colorClass}) {
-  return (
-    <button onClick={onClick}
-      className={`px-3 py-1.5 rounded-full text-xs border transition-all ${selected ? (colorClass||'bg-blue-700 text-white border-blue-700') : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}>
-      {label}
-    </button>
-  );
+  return msg ? <div className="fixed bottom-4 right-4 bg-blue-800 text-white px-4 py-2 rounded-lg text-xs z-50 shadow-lg animate-pulse">{msg}</div> : null;
 }
 
 function LikertRow({value, onChange}) {
@@ -276,8 +285,12 @@ function FreqRow({value, onChange}) {
   return (
     <div className="mt-2">
       <div className="flex flex-wrap gap-2">
-        {opts.map(o => <SelBtn key={o} label={o} selected={!isNA(value)&&value===o} onClick={() => onChange(o)}/>)}
-        <SelBtn label="🚫 N/A" selected={isNA(value)} onClick={() => onChange(NA_VALUE)} colorClass="bg-gray-200 text-gray-600 border-gray-400"/>
+        {opts.map(o => (
+          <button key={o} onClick={() => onChange(o)}
+            className={`px-3 py-1.5 rounded-full text-xs border transition-all ${!isNA(value)&&value===o ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}>{o}</button>
+        ))}
+        <button onClick={() => onChange(NA_VALUE)}
+          className={`px-3 py-1.5 rounded-full text-xs border transition-all ${isNA(value) ? 'bg-gray-200 text-gray-600 border-gray-400' : 'bg-white text-gray-400 border-dashed border-gray-300 hover:border-gray-500'}`}>🚫 N/A</button>
       </div>
       <p className="text-xs text-gray-400 italic mt-1">N/A = module non utilisé dans votre filiale</p>
     </div>
@@ -289,8 +302,12 @@ function OuiNonRow({value, onChange}) {
   return (
     <div className="mt-2">
       <div className="flex flex-wrap gap-2">
-        {opts.map(o => <SelBtn key={o} label={o} selected={!isNA(value)&&value===o} onClick={() => onChange(o)}/>)}
-        <SelBtn label="🚫 N/A" selected={isNA(value)} onClick={() => onChange(NA_VALUE)} colorClass="bg-gray-200 text-gray-600 border-gray-400"/>
+        {opts.map(o => (
+          <button key={o} onClick={() => onChange(o)}
+            className={`px-3 py-1.5 rounded-full text-xs border transition-all ${!isNA(value)&&value===o ? 'bg-blue-700 text-white border-blue-700' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}>{o}</button>
+        ))}
+        <button onClick={() => onChange(NA_VALUE)}
+          className={`px-3 py-1.5 rounded-full text-xs border transition-all ${isNA(value) ? 'bg-gray-200 text-gray-600 border-gray-400' : 'bg-white text-gray-400 border-dashed border-gray-300 hover:border-gray-500'}`}>🚫 N/A</button>
       </div>
       <p className="text-xs text-gray-400 italic mt-1">N/A = module non utilisé dans votre filiale</p>
     </div>
@@ -323,11 +340,10 @@ function QuestionCard({q, value, onChange}) {
         <div className="mt-2 space-y-1">
           {q.opts.map(o => {
             const vals = value ? JSON.parse(value) : [];
-            const checked = vals.includes(o);
             return (
               <label key={o} className="flex items-start gap-2 cursor-pointer p-1.5 rounded hover:bg-gray-50">
-                <input type="checkbox" checked={checked} onChange={() => {
-                  const nv = checked ? vals.filter(x=>x!==o) : [...vals,o];
+                <input type="checkbox" checked={vals.includes(o)} onChange={() => {
+                  const nv = vals.includes(o) ? vals.filter(x=>x!==o) : [...vals,o];
                   onChange(JSON.stringify(nv));
                 }} className="mt-0.5 accent-blue-600"/>
                 <span className="text-xs text-gray-700">{o}</span>
@@ -336,6 +352,96 @@ function QuestionCard({q, value, onChange}) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Welcome Screen ───────────────────────────────────────────────────────────
+function WelcomeScreen({onNew, onResume}) {
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const ls = lsLoad();
+
+  const handleResume = async () => {
+    if (!code.trim()) { setErr('Veuillez saisir votre code de reprise.'); return; }
+    setLoading(true); setErr('');
+    try {
+      const {data, error} = await supabase.from('reponses').select('*').eq('code_reprise', code.trim().toUpperCase()).single();
+      if (error || !data) { setErr('Code introuvable. Vérifiez votre code et réessayez.'); setLoading(false); return; }
+      if (data.statut === 'soumis') { setErr('Ce questionnaire a déjà été soumis définitivement.'); setLoading(false); return; }
+      onResume({...data.reponses, _id: data.id, _code: data.code_reprise});
+    } catch(e) { setErr('Erreur de connexion. Réessayez.'); }
+    setLoading(false);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden">
+        <div className="bg-blue-800 p-6 text-center">
+          <div className="inline-block bg-red-600 text-white text-xs font-bold px-3 py-0.5 rounded-full mb-3 tracking-widest">🔒 CONFIDENTIEL</div>
+          <h1 className="text-2xl font-bold text-white">Star Oil Group</h1>
+          <p className="text-blue-300 text-sm mt-1">Direction des Systèmes d'Information</p>
+        </div>
+        <div className="p-6">
+          <h2 className="text-lg font-bold text-gray-800 text-center">Questionnaire d'évaluation</h2>
+          <p className="text-blue-700 font-semibold text-center mt-1">Performance de la plateforme ODOO</p>
+          <p className="text-gray-400 text-xs text-center mt-0.5">Réf. MEA01-QUEST-ODOO-002 v3.1 · COBIT® 2019 · Toutes filiales</p>
+
+          <div className="mt-5 bg-blue-50 border border-blue-100 rounded-xl p-4">
+            <p className="text-xs text-blue-700 font-semibold mb-1">📋 À propos de ce questionnaire</p>
+            <p className="text-xs text-blue-600 leading-relaxed">17 sections · ~100 questions · COBIT® 2019 · Enrichi 1 066 tickets HESK. Durée estimée : 30–40 min. Vous pouvez interrompre et reprendre à tout moment grâce à votre code de reprise.</p>
+          </div>
+
+          <button onClick={onNew} className="w-full mt-5 bg-blue-700 hover:bg-blue-800 text-white font-semibold py-3 rounded-xl transition-all text-sm shadow-sm">
+            🆕 Commencer un nouveau questionnaire
+          </button>
+
+          {/* Reprise par code */}
+          <div className="mt-4 border border-gray-200 rounded-xl p-4">
+            <p className="text-xs font-semibold text-gray-700 mb-2">🔄 Reprendre un questionnaire en cours</p>
+            <div className="flex gap-2">
+              <input value={code} onChange={e => setCode(e.target.value.toUpperCase())}
+                placeholder="Ex : SOG-ABSN-K7X2"
+                onKeyDown={e => e.key==='Enter' && handleResume()}
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-blue-400 font-mono tracking-widest uppercase"/>
+              <button onClick={handleResume} disabled={loading}
+                className="px-4 py-2 bg-blue-700 hover:bg-blue-800 text-white text-xs font-medium rounded-lg disabled:opacity-50 transition-all">
+                {loading ? '...' : 'Reprendre'}
+              </button>
+            </div>
+            {err && <p className="text-xs text-red-500 mt-2">{err}</p>}
+          </div>
+
+          {/* Reprise depuis localStorage */}
+          {ls && ls._code && (
+            <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+              <p className="text-xs font-semibold text-amber-700 mb-1">💾 Sauvegarde locale détectée</p>
+              <p className="text-xs text-amber-600 mb-2">Questionnaire en cours — <strong>{ls.id_nom||'Répondant'}</strong> · {ls.id_filiale||''} · Code : <span className="font-mono font-bold">{ls._code}</span></p>
+              <button onClick={() => onResume(ls)} className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-lg transition-all">
+                ↩️ Reprendre ma session locale
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Code Banner ──────────────────────────────────────────────────────────────
+function CodeBanner({code, onCopy}) {
+  return (
+    <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-center gap-3 mb-4">
+      <span className="text-lg">🔑</span>
+      <div className="flex-1">
+        <p className="text-xs font-semibold text-amber-800">Votre code de reprise</p>
+        <p className="font-mono font-bold text-amber-900 tracking-widest text-base">{code}</p>
+        <p className="text-xs text-amber-600 mt-0.5">Notez ce code — il vous permettra de reprendre votre questionnaire depuis n'importe quel appareil.</p>
+      </div>
+      <button onClick={onCopy} className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-lg transition-all flex-shrink-0">
+        📋 Copier
+      </button>
     </div>
   );
 }
@@ -354,9 +460,9 @@ function EmailModal({data, onClose, onSubmit}) {
   const avg_arr = secKeys.map(s=>sectionScore(s,data)).filter(s=>s!==null);
   const avg = avg_arr.length ? (avg_arr.reduce((a,b)=>a+b,0)/avg_arr.length).toFixed(2) : null;
 
-  const buildBody = (ai) => {
-    const lines = secKeys.map(sid=>{const sc=sectionScore(sid,data);const lvl=scoreLevel(sc);const p=secProgress(sid,data);return`  Section ${sid} — ${SECTION_LABELS[sid]}: ${sc!==null?sc.toFixed(1)+'/5':'N/A'} (${lvl.lvl} — ${lvl.label})${p.na>0?' ['+p.na+' N/A]':''}`;});
-    return `QUESTIONNAIRE D'ÉVALUATION ERP ODOO — STAR OIL GROUP\nRef : MEA01-QUEST-ODOO-002 v3.0 | COBIT® 2019\nDate : ${new Date().toLocaleDateString('fr-FR')}\n\nRÉPONDANT\nNom : ${data.id_nom||'—'}\nPays : ${data.id_pays||'—'}\nFiliale : ${data.id_filiale||'—'}\nDirection : ${data.id_dir||'—'}\nAncienneté : ${data.id_anc||'—'}\nComplétion : ${prog.answered}/${prog.total} répondues, ${prog.na} N/A (${pct}% traité)\n\nSCORES COBIT® PAR SECTION\n${lines.join('\n')}\n\nScore moyen global : ${avg||'N/A'}/5\n\nANALYSE IA COBIT® 2019\n${ai||'[Non générée]'}\n\n---\nStar Oil Group — DSI Groupe — CONFIDENTIEL`;
+  const buildBody = ai => {
+    const lines = secKeys.map(sid=>{const sc=sectionScore(sid,data);const lvl=scoreLevel(sc);const p=secProgress(sid,data);return`  ${sid} — ${SECTION_LABELS[sid]}: ${sc!==null?sc.toFixed(1)+'/5':'N/A'} (${lvl.lvl} — ${lvl.label})${p.na>0?' ['+p.na+' N/A]':''}`;});
+    return `QUESTIONNAIRE D'ÉVALUATION ERP ODOO — STAR OIL GROUP\nRef : MEA01-QUEST-ODOO-002 v3.1 | COBIT® 2019\nDate : ${new Date().toLocaleDateString('fr-FR')}\nCode reprise : ${data._code||'—'}\n\nRÉPONDANT\nNom : ${data.id_nom||'—'}\nPays : ${data.id_pays||'—'}\nFiliale : ${data.id_filiale||'—'}\nDirection : ${data.id_dir||'—'}\nAncienneté : ${data.id_anc||'—'}\nComplétion : ${prog.answered}/${prog.total} répondues, ${prog.na} N/A (${pct}% traité)\n\nSCORES COBIT® PAR SECTION\n${lines.join('\n')}\n\nScore moyen global : ${avg||'N/A'}/5\n\nANALYSE IA COBIT® 2019\n${ai||'[Non générée]'}\n\n---\nStar Oil Group — DSI Groupe — CONFIDENTIEL`;
   };
 
   const handleAI = async () => {
@@ -365,21 +471,15 @@ function EmailModal({data, onClose, onSubmit}) {
     catch { setAiStatus('error'); }
   };
 
-  const handleEmail = () => {
-    const body = buildBody(aiText);
-    window.open(`mailto:${encodeURIComponent(to)}?${cc?'cc='+encodeURIComponent(cc)+'&':''}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
-  };
-
   const steps = ['Destinataires','Analyse IA','Aperçu & Envoi'];
   return (
     <div className="fixed inset-0 bg-black/50 flex items-start justify-center pt-8 z-50 px-4" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto p-6">
         <div className="flex items-center gap-3 mb-5">
           <span className="text-xl">📧</span>
-          <div><p className="font-semibold text-gray-800">Envoyer les résultats à la DSI</p><p className="text-xs text-gray-400">MEA01-QUEST-ODOO-002 v3.0 — 1 066 tickets HESK</p></div>
+          <div><p className="font-semibold text-gray-800">Envoyer les résultats à la DSI</p><p className="text-xs text-gray-400">MEA01-QUEST-ODOO-002 v3.1</p></div>
           <button onClick={onClose} className="ml-auto text-gray-400 hover:text-gray-600 text-xl">✕</button>
         </div>
-        {/* Step bar */}
         <div className="flex items-center mb-5">
           {steps.map((l,i) => (
             <div key={l} className="flex items-center flex-1">
@@ -394,7 +494,7 @@ function EmailModal({data, onClose, onSubmit}) {
         {step===1 && (
           <div>
             <div className="grid grid-cols-3 gap-3 mb-4">
-              {[['Réponses',pct+'%','text-blue-700'],['Score moy.',(avg||'—')+'/5',`text-${scoreLevel(avg?parseFloat(avg):null).color}`],['N/A',prog.na,'text-gray-500']].map(([l,v,c])=>(
+              {[['Réponses',pct+'%','text-blue-700'],['Score moy.',(avg||'—')+'/5','text-gray-700'],['N/A',prog.na,'text-gray-500']].map(([l,v,c])=>(
                 <div key={l} className="bg-gray-50 rounded-xl p-3 text-center"><p className="text-xs text-gray-500">{l}</p><p className={`text-lg font-semibold ${c}`}>{v}</p></div>
               ))}
             </div>
@@ -411,14 +511,14 @@ function EmailModal({data, onClose, onSubmit}) {
         )}
         {step===2 && (
           <div>
-            <div className="bg-blue-50 rounded-xl p-3 mb-4 text-xs text-blue-800">🤖 <strong>Claude AI</strong> — analyse intégrant vos réponses + 1 066 tickets HESK + {prog.na} questions N/A</div>
-            {aiStatus==='idle' && <div className="text-center py-6"><p className="text-xs text-gray-500 mb-3">L'IA analysera vos réponses et les données HESK pour un diagnostic COBIT factuel.</p><button onClick={handleAI} className="px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-medium hover:bg-blue-800">✨ Lancer l'analyse IA</button></div>}
+            <div className="bg-blue-50 rounded-xl p-3 mb-4 text-xs text-blue-800">🤖 <strong>Claude AI</strong> — analyse intégrant vos réponses + 1 066 tickets HESK</div>
+            {aiStatus==='idle' && <div className="text-center py-6"><p className="text-xs text-gray-500 mb-3">L'IA analysera vos réponses et les données HESK pour un diagnostic COBIT factuel.</p><button onClick={handleAI} className="px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-medium">✨ Lancer l'analyse IA</button></div>}
             {aiStatus==='generating' && <div className="text-center py-6"><p className="text-sm text-blue-600 font-medium animate-pulse">Analyse en cours...</p></div>}
-            {aiStatus==='done' && <div><p className="text-xs text-green-700 font-medium mb-2">✅ Analyse générée</p><div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono leading-relaxed">{aiText}</div><button onClick={()=>navigator.clipboard.writeText(aiText)} className="mt-2 px-3 py-1 rounded border border-gray-200 text-xs text-gray-500 hover:bg-gray-50">📋 Copier</button></div>}
+            {aiStatus==='done' && <div><p className="text-xs text-green-700 font-medium mb-2">✅ Analyse générée</p><div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600 max-h-40 overflow-y-auto whitespace-pre-wrap font-mono">{aiText}</div><button onClick={()=>navigator.clipboard.writeText(aiText)} className="mt-2 px-3 py-1 rounded border border-gray-200 text-xs hover:bg-gray-50">📋 Copier</button></div>}
             {aiStatus==='error' && <div className="bg-red-50 rounded-lg p-3 text-xs text-red-700">Erreur IA — l'e-mail sera envoyé sans analyse.</div>}
             <div className="flex justify-between mt-4 pt-3 border-t border-gray-100">
-              <button onClick={()=>setStep(1)} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">← Retour</button>
-              <button onClick={()=>setStep(3)} disabled={aiStatus==='generating'} className="px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-medium hover:bg-blue-800 disabled:opacity-50">Aperçu →</button>
+              <button onClick={()=>setStep(1)} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600">← Retour</button>
+              <button onClick={()=>setStep(3)} disabled={aiStatus==='generating'} className="px-4 py-2 rounded-lg bg-blue-700 text-white text-xs font-medium disabled:opacity-50">Aperçu →</button>
             </div>
           </div>
         )}
@@ -426,13 +526,13 @@ function EmailModal({data, onClose, onSubmit}) {
           <div>
             <div className="bg-gray-50 rounded-lg p-3 mb-3 text-xs"><div>À : <strong>{to}</strong></div>{cc&&<div>CC : {cc}</div>}<div>Objet : {subject}</div></div>
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-500 max-h-48 overflow-y-auto whitespace-pre-wrap font-mono">{buildBody(aiText)}</div>
-            <div className="bg-green-50 rounded-lg p-3 mt-3 text-xs text-green-700">ℹ️ Ouvre votre client de messagerie (Outlook, Thunderbird…) avec tout prérempli.</div>
+            <div className="bg-green-50 rounded-lg p-3 mt-3 text-xs text-green-700">ℹ️ Ouvre votre client de messagerie avec tout prérempli.</div>
             <div className="flex justify-between items-center mt-4 pt-3 border-t border-gray-100">
-              <button onClick={()=>setStep(2)} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">← Retour</button>
+              <button onClick={()=>setStep(2)} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600">← Retour</button>
               <div className="flex gap-2">
                 <button onClick={()=>navigator.clipboard.writeText(buildBody(aiText))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs hover:bg-gray-50">📋</button>
-                <button onClick={handleEmail} className="px-4 py-2 rounded-lg bg-yellow-400 text-yellow-900 text-xs font-medium hover:bg-yellow-500">📤 Ouvrir messagerie</button>
-                <button onClick={onSubmit} className="px-4 py-2 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700">💾 Enregistrer</button>
+                <button onClick={()=>window.open(`mailto:${encodeURIComponent(to)}?${cc?'cc='+encodeURIComponent(cc)+'&':''}subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(buildBody(aiText))}`, '_blank')} className="px-4 py-2 rounded-lg bg-yellow-400 text-yellow-900 text-xs font-medium hover:bg-yellow-500">📤 Ouvrir messagerie</button>
+                <button onClick={onSubmit} className="px-4 py-2 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700">💾 Soumettre</button>
               </div>
             </div>
           </div>
@@ -444,31 +544,87 @@ function EmailModal({data, onClose, onSubmit}) {
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [screen, setScreen] = useState('welcome'); // welcome | form | done
   const [si, setSi] = useState(0);
   const [data, setData] = useState({});
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const saveTimer = useRef(null);
 
   const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 2500); };
+
+  // Auto-save : localStorage + Supabase upsert (debounced 2s)
+  useEffect(() => {
+    if (screen !== 'form' || !data._code) return;
+    lsSave(data);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      try {
+        await supabase.from('reponses').upsert({
+          id: data._id,
+          code_reprise: data._code,
+          nom: data.id_nom||'',
+          filiale: data.id_filiale||'',
+          fonction: data.id_dir||'',
+          anciennete: data.id_anc||'',
+          frequence: data.id_freq||'',
+          reponses: data,
+          statut: 'en_cours',
+        }, {onConflict: 'id'});
+      } catch(e) {}
+    }, 2000);
+    return () => clearTimeout(saveTimer.current);
+  }, [data, screen]);
 
   const setAnswer = (code, val) => setData(p => ({...p, [code]: val}));
   const setId = (k, v) => setData(p => ({...p, [k]: v}));
 
+  // Démarrer un nouveau questionnaire
+  const handleNew = () => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
+    setData({_id: id, _code: ''});
+    setSi(0);
+    setScreen('form');
+  };
+
+  // Reprendre un questionnaire existant
+  const handleResume = (savedData) => {
+    setData(savedData);
+    setSi(1);
+    setScreen('form');
+    showToast('✅ Questionnaire rechargé !');
+  };
+
+  // Générer le code après identification
+  const handleGenerateCode = () => {
+    if (!data.id_nom || !data.id_pays) return;
+    if (data._code) return; // déjà généré
+    const code = genCode(data.id_nom, data.id_pays);
+    setData(p => ({...p, _code: code}));
+    showToast('🔑 Code généré : ' + code);
+  };
+
+  // Soumission finale
   const handleSubmit = async () => {
     if (!data.id_nom || !data.id_pays) { showToast('⚠️ Nom et pays obligatoires'); return; }
     setSubmitting(true);
     try {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-      const {error} = await supabase.from('reponses').insert({
-        id, nom: data.id_nom||'', filiale: data.id_filiale||'',
-        fonction: data.id_dir||'', anciennete: data.id_anc||'',
-        frequence: data.id_freq||'', reponses: data,
-      });
+      const {error} = await supabase.from('reponses').upsert({
+        id: data._id,
+        code_reprise: data._code,
+        nom: data.id_nom||'',
+        filiale: data.id_filiale||'',
+        fonction: data.id_dir||'',
+        anciennete: data.id_anc||'',
+        frequence: data.id_freq||'',
+        reponses: data,
+        statut: 'soumis',
+      }, {onConflict: 'id'});
       if (error) throw error;
-      setSubmitted(true); setModal(false);
-      showToast('✅ Réponses enregistrées !');
+      lsClear();
+      setModal(false);
+      setScreen('done');
     } catch(e) { showToast('❌ Erreur : ' + e.message); console.error(e); }
     setSubmitting(false);
   };
@@ -477,18 +633,34 @@ export default function App() {
   const pct = Math.round((prog.answered + prog.na) / prog.total * 100);
   const sec = SECTIONS[si];
 
-  if (submitted) return (
+  // ── Welcome ──
+  if (screen === 'welcome') return (
+    <>
+      <WelcomeScreen onNew={handleNew} onResume={handleResume}/>
+      <Toast msg={toast}/>
+    </>
+  );
+
+  // ── Done ──
+  if (screen === 'done') return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-8 text-center">
         <div className="text-5xl mb-4">✅</div>
-        <h2 className="text-xl font-bold text-gray-800 mb-2">Réponses enregistrées !</h2>
-        <p className="text-gray-500 text-sm mb-2">Merci <strong>{data.id_nom||''}</strong>, votre retour d'expérience a bien été soumis à la DSI Groupe.</p>
-        <p className="text-xs text-gray-400 mb-6">MEA01-QUEST-ODOO-002 v3.0 · Star Oil Group · CONFIDENTIEL</p>
-        <button onClick={() => { setSubmitted(false); setData({}); setSi(0); }} className="w-full bg-blue-700 hover:bg-blue-800 text-white font-medium py-2.5 rounded-xl transition-all text-sm">Nouvelle réponse</button>
+        <h2 className="text-xl font-bold text-gray-800 mb-2">Questionnaire soumis !</h2>
+        <p className="text-gray-500 text-sm mb-4">Merci <strong>{data.id_nom||''}</strong>, vos réponses ont bien été enregistrées et transmises à la DSI Groupe.</p>
+        <div className="bg-gray-50 rounded-xl p-3 text-xs text-left space-y-1 mb-5">
+          <p><strong className="text-gray-600">Filiale :</strong> {data.id_filiale||'—'}</p>
+          <p><strong className="text-gray-600">Pays :</strong> {data.id_pays||'—'}</p>
+          <p><strong className="text-gray-600">Date :</strong> {new Date().toLocaleDateString('fr-FR', {day:'2-digit',month:'long',year:'numeric'})}</p>
+        </div>
+        <p className="text-xs text-gray-400 mb-6">MEA01-QUEST-ODOO-002 v3.1 · Star Oil Group · CONFIDENTIEL</p>
+        <button onClick={() => { setScreen('welcome'); setData({}); setSi(0); }} className="w-full bg-blue-700 hover:bg-blue-800 text-white font-medium py-2.5 rounded-xl transition-all text-sm">Retour à l'accueil</button>
       </div>
+      <Toast msg={toast}/>
     </div>
   );
 
+  // ── Form ──
   return (
     <div className="min-h-screen bg-slate-100 flex justify-center py-4 px-2">
       <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -496,14 +668,23 @@ export default function App() {
         <div className="bg-blue-800 px-4 py-3 flex items-center justify-between">
           <div>
             <p className="text-white font-medium text-sm">🗄️ Évaluation ERP Odoo — Star Oil Group</p>
-            <p className="text-blue-300 text-xs">MEA01-QUEST-ODOO-002 v3.0 | COBIT® 2019 | HESK (1 066 tickets)</p>
+            <p className="text-blue-300 text-xs">MEA01-QUEST-ODOO-002 v3.1 | COBIT® 2019 | HESK (1 066 tickets)</p>
           </div>
-          <span className="text-xs text-blue-100 bg-blue-900 px-2 py-1 rounded-full">{pct}% traité</span>
+          <div className="flex items-center gap-2">
+            {data._code && (
+              <span className="text-xs text-amber-300 font-mono bg-blue-900 px-2 py-1 rounded cursor-pointer"
+                onClick={() => { navigator.clipboard.writeText(data._code); showToast('Code copié !'); }}
+                title="Cliquer pour copier">
+                🔑 {data._code}
+              </span>
+            )}
+            <span className="text-xs text-blue-100 bg-blue-900 px-2 py-1 rounded-full">{pct}%</span>
+          </div>
         </div>
         {/* Progress */}
         <div className="h-1 bg-blue-900"><div className="h-1 bg-yellow-400 transition-all duration-300" style={{width:`${pct}%`}}/></div>
         {/* Section nav */}
-        <div className="flex overflow-x-auto gap-1 px-3 py-2 bg-slate-50 border-b border-gray-100 scrollbar-hide">
+        <div className="flex overflow-x-auto gap-1 px-3 py-2 bg-slate-50 border-b border-gray-100">
           {SECTIONS.map((s,i) => {
             const p = s.id !== 'id' && s.id !== 'dash' ? secProgress(s.id, data) : null;
             const done = p && p.answered + p.na === p.total && p.total > 0;
@@ -518,7 +699,7 @@ export default function App() {
 
         {/* Content */}
         <div className="p-4">
-          {sec.id === 'id' && <IdentSection data={data} setId={setId} onNext={() => setSi(1)}/>}
+          {sec.id === 'id' && <IdentSection data={data} setId={setId} onCodeGenerate={handleGenerateCode} onNext={() => setSi(1)} onCopy={() => { navigator.clipboard.writeText(data._code); showToast('Code copié !'); }}/>}
           {sec.id === 'dash' && <DashSection data={data} si={si} onBack={() => setSi(si-1)} onEmail={() => setModal(true)} onSubmit={handleSubmit} submitting={submitting}/>}
           {sec.id !== 'id' && sec.id !== 'dash' && (
             <SectionView sec={sec} si={si} data={data} setAnswer={setAnswer} onEmail={() => setModal(true)} onGo={setSi}/>
@@ -531,11 +712,14 @@ export default function App() {
   );
 }
 
-function IdentSection({data, setId, onNext}) {
+// ─── Ident Section ────────────────────────────────────────────────────────────
+function IdentSection({data, setId, onCodeGenerate, onNext, onCopy}) {
   const dirs = ["DAF — Finances","DEX — Exploitation","DRH — Ressources Humaines","DC — Commercial","DSI — Systèmes d'Information","DG — Direction Générale","Autre"];
+  const canGenerate = data.id_nom && data.id_pays && !data._code;
+  const hasCode = !!data._code;
+
   return (
     <div>
-      {/* HESK summary */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-4">
         <p className="text-xs font-semibold text-blue-700 mb-3">📊 Contexte : 1 066 tickets support HESK (2023–2026)</p>
         <div className="grid grid-cols-4 gap-2">
@@ -547,13 +731,16 @@ function IdentSection({data, setId, onNext}) {
           ))}
         </div>
       </div>
+
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 text-xs text-blue-800">
         🚫 <strong>Option Non applicable (N/A)</strong> — Si un module n'est pas utilisé dans votre filiale, sélectionnez N/A. Ces réponses sont exclues du calcul du score COBIT.
       </div>
+
       <div className="border-l-4 border-blue-600 pl-3 mb-4 bg-slate-50 py-2 rounded-r-lg">
         <h2 className="font-semibold text-gray-800">👤 Identification du répondant</h2>
-        <p className="text-xs text-blue-500 mt-0.5">Vos réponses seront analysées conjointement avec les tickets HESK de votre filiale</p>
+        <p className="text-xs text-blue-500 mt-0.5">Remplissez votre nom et pays pour générer votre code de reprise</p>
       </div>
+
       <div className="grid grid-cols-2 gap-3 mb-4">
         <div className="col-span-2">
           <label className="text-xs font-medium text-gray-600">Nom et prénom *</label>
@@ -596,13 +783,32 @@ function IdentSection({data, setId, onNext}) {
           <input value={data.id_modules||''} onChange={e=>setId('id_modules',e.target.value)} placeholder="Comptabilité, Stocks, Ventes, Paie…" className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-blue-400"/>
         </div>
       </div>
-      <div className="flex justify-end pt-3 border-t border-gray-100">
-        <button onClick={onNext} className="px-5 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-medium rounded-xl text-sm transition-all">Commencer →</button>
+
+      {/* Code generation / display */}
+      {!hasCode && (
+        <div className="mb-4">
+          <button onClick={onCodeGenerate} disabled={!canGenerate}
+            className={`w-full py-3 rounded-xl font-semibold text-sm transition-all ${canGenerate ? 'bg-amber-500 hover:bg-amber-600 text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+            🔑 Générer mon code de reprise
+          </button>
+          {!canGenerate && <p className="text-xs text-gray-400 text-center mt-1">Remplissez Nom et Pays pour générer votre code</p>}
+        </div>
+      )}
+
+      {hasCode && <CodeBanner code={data._code} onCopy={onCopy}/>}
+
+      <div className="flex justify-between pt-3 border-t border-gray-100">
+        <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-500 hover:bg-gray-50">← Accueil</button>
+        <button onClick={onNext} disabled={!hasCode}
+          className={`px-5 py-2.5 font-medium rounded-xl text-sm transition-all ${hasCode ? 'bg-blue-700 hover:bg-blue-800 text-white' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}>
+          Commencer →
+        </button>
       </div>
     </div>
   );
 }
 
+// ─── Section View ─────────────────────────────────────────────────────────────
 function SectionView({sec, si, data, setAnswer, onEmail, onGo}) {
   const qs = QUESTIONS[sec.id] || [];
   const p = secProgress(sec.id, data);
@@ -640,6 +846,7 @@ function SectionView({sec, si, data, setAnswer, onEmail, onGo}) {
   );
 }
 
+// ─── Dash Section ─────────────────────────────────────────────────────────────
 function DashSection({data, si, onBack, onEmail, onSubmit, submitting}) {
   const secKeys = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q'];
   const scores = secKeys.map(sid => ({sid, sc: sectionScore(sid,data), p: secProgress(sid,data)}));
@@ -649,10 +856,11 @@ function DashSection({data, si, onBack, onEmail, onSubmit, submitting}) {
   const prog = totalProgress(data);
   const pct = Math.round((prog.answered+prog.na)/prog.total*100);
   const critiques = scores.filter(x=>x.sc!==null&&x.sc<2.5).map(x=>SECTION_LABELS[x.sid]);
+
   return (
     <div>
       <p className="font-semibold text-gray-800 mb-1">📊 Tableau de synthèse COBIT® 2019</p>
-      <p className="text-xs text-gray-400 mb-4">MEA01-QUEST-ODOO-002 v3.0 — {data.id_pays||''} {data.id_filiale||'Filiale non renseignée'}</p>
+      <p className="text-xs text-gray-400 mb-4">MEA01-QUEST-ODOO-002 v3.1 — {data.id_pays||''} {data.id_filiale||'Filiale non renseignée'}</p>
       <div className="grid grid-cols-4 gap-2 mb-4">
         {[
           ['Score global', avg?(avg.toFixed(1)+'/5'):'—', avgLvl.color, avgLvl.lvl+' — '+avgLvl.label],
@@ -677,7 +885,7 @@ function DashSection({data, si, onBack, onEmail, onSubmit, submitting}) {
               <p className="text-xl font-bold" style={{color:lvl.color}}>{sc!==null?sc.toFixed(1):'—'}</p>
               <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium ${lvl.badge==='badge-0'?'bg-red-100 text-red-700':lvl.badge==='badge-1'?'bg-orange-100 text-orange-700':lvl.badge==='badge-2'?'bg-gray-100 text-gray-600':lvl.badge==='badge-3'?'bg-green-100 text-green-700':'bg-emerald-100 text-emerald-700'}`}>{lvl.lvl} — {lvl.label}</span>
               {p.na>0&&<span className="ml-1 inline-block text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">{p.na} N/A</span>}
-              <div className="h-1 bg-gray-200 rounded-full mt-2"><div className="h-1 rounded-full" style={{width:`${pct2}%`,backgroundColor:lvl.color}}/></div>
+              <div className="h-1 bg-gray-200 rounded-full mt-2"><div className="h-1 rounded-full transition-all" style={{width:`${pct2}%`,backgroundColor:lvl.color}}/></div>
             </div>
           );
         })}
@@ -688,13 +896,13 @@ function DashSection({data, si, onBack, onEmail, onSubmit, submitting}) {
           <p className="text-xs text-red-600">{critiques.join(' • ')}</p>
         </div>
       )}
-      <p className="text-xs text-gray-400 italic mb-4">ℹ️ Les questions N/A sont exclues du calcul du score COBIT — modules non utilisés dans votre filiale.</p>
+      <p className="text-xs text-gray-400 italic mb-4">ℹ️ Les questions N/A sont exclues du calcul du score COBIT.</p>
       <div className="flex justify-between items-center pt-3 border-t border-gray-100">
         <button onClick={onBack} className="px-4 py-2 rounded-lg border border-gray-200 text-xs text-gray-600 hover:bg-gray-50">← Retour</button>
         <div className="flex gap-2">
           <button onClick={onEmail} className="px-4 py-2 rounded-lg bg-yellow-400 text-yellow-900 text-xs font-medium hover:bg-yellow-500">📧 Envoyer à la DSI</button>
           <button onClick={onSubmit} disabled={submitting} className="px-4 py-2 rounded-lg bg-green-600 text-white text-xs font-medium hover:bg-green-700 disabled:opacity-50">
-            {submitting ? 'Enregistrement...' : '💾 Enregistrer'}
+            {submitting ? 'Envoi...' : '💾 Soumettre'}
           </button>
         </div>
       </div>
