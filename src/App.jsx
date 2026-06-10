@@ -115,7 +115,7 @@ const QUESTIONS = {
   ],
   I:[
     {code:'I.01',cobit:'APO11.04',text:"Le lettrage et rapprochement des écritures comptables sont-ils fiables ?",type:'likert',hesk:"Erreur rapprochement bancaire — champ move_id invalide"},
-    {code:'I.02',cobit:'APO11.04',text:"Le rapprochement bancaire automatique fonctionne-t-il correctement ?",type:'likert',hesk:"Rapprochement bancaire cassé — InvalidField account.bank.statement.move_id"},
+    {code:'I.02',cobit:'APO11.04',text:"Le rapprochement bancaire fonctionne-t-il correctement ?",type:'likert',hesk:"Rapprochement bancaire cassé — InvalidField account.bank.statement.move_id"},
     {code:'I.03',cobit:'APO11.04',text:"Les immobilisations (création, amortissements, sorties/cessions) sont-elles correctement gérées ?",type:'likert',hesk:"Amortissements déc 2023 sur comptes 68** génériques au lieu des comptes spécifiques"},
     {code:'I.04',cobit:'APO11.04',text:"Les écritures analytiques des mouvements de stock restent-elles cohérentes avec la comptabilité générale ?",type:'oui_non',hesk:"Déconnexion signalée : analytique et comptabilité coûts stocks divergent"},
     {code:'I.05',cobit:'APO11.04',text:"Les comptes fournisseurs 401 sont-ils correctement séparés (produits pétroliers vs biens et services) ?",type:'oui_non'},
